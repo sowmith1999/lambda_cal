@@ -2,26 +2,40 @@
 (require racket/hash)
 (require print-debug/print-dbg)
 ;; 0 CFA for λ call
-;; Write the interp and then change the store behaviour for a CFA, Yikes, No idea
 
+(define (alloc x store)
+  ;; (match state
+  ;;   [`(,expr ,env ,store ,kont-ptr)
+  (cons x (hash-count store))
+  ;; ])
+  )
 (define (interpCESK* state)
   (match state
     [`(,(? symbol? x) ,env ,store ,kont-ptr)
      (define x-val-clo (hash-ref store (hash-ref env x)))
      (interpCESK* `(,(cadr x-val-clo) ,(caddr x-val-clo) ,store ,kont-ptr))]
     [`((,ef ,eb) ,env ,store ,kont-ptr)
-     (define kont-addr (gensym "kont"))
+     (define kont-addr (alloc `kont store))
      (interpCESK* (p-dbg `(,ef ,env ,(hash-set store kont-addr `(ar ,eb ,env ,kont-ptr)) ,kont-addr)))]
     [`(,v ,env ,store ,kont-ptr)
      (match (hash-ref store kont-ptr)
        [`(ar ,eb ,env-prime ,kont-ptr-prime)
-        (define kont-addr (gensym "kont"))
+        (define kont-addr (alloc `kont store))
         (interpCESK* (p-dbg `(,eb ,env-prime ,(hash-set store kont-addr `(fn ,v ,env ,kont-ptr-prime)) ,kont-addr)))]
        [`(fn (λ (,x) ,eb) ,env-prime ,kont-ptr-prime)
-        (define var-addr (gensym "var"))
+        (define var-addr (alloc v store))
         (interpCESK* `(,eb ,(hash-set env-prime x var-addr) ,(hash-set store var-addr `(clo ,v ,env))  ,kont-ptr-prime))]
        [`halt
-        `((clo ,v ,env) ,store)])]))
+        ;; `((clo ,v ,env) ,store)])]))
+        ;; store])]))
+        `(,v ,store)])]))
+;; (define store (hash `x `(clo 0 ,(hash)) `y `(clo 1 ,(hash)) `halt `halt))
+;; (define env (hash `x `x `y `y `halt `halt))
+;; (interpCESK* `((((λ (x) x) (λ (y) y)) (λ (z) x)) ,env ,store halt))
+;; (define env (hash `halt `halt))
+;; (define store (hash `halt `halt))
+;; (interpCESK* `(((λ (z) z)((( (λ (p)(λ (a) (λ (b) ((p a) b)))) (λ (x) (λ (y) y))) 0) 1)) ,env ,store halt))
+;; (interpCESK* `((((λ (x) x) (λ (y) x)) 1) ,env ,store halt))
 
 ;; The 0-CFA
 ;; What makes a 0-CFA 0-CFA,
@@ -57,88 +71,49 @@
 ;; can be allocated, for now directly using gen-sym
 
 
-;; Only store is abstract
-;; Here the simple rule is, store(addr) -> {values..}, consider all of them as possibility
-;; We need to fold over all the values in store when dereferencing an address
-;; Question: How to figure out when to reuse addresses?
-(define (abstractCESK* state)
-  (match state
-    [`(,(? symbol? x) ,env ,store ,kont-ptr ,time)
-     (define x-val-clo (store-ref store (hash-ref env x)))
-     (abstractCESK* (p-dbg `(,(cadr x-val-clo) ,(caddr x-val-clo)
-                                               ,store ,kont-ptr ,(get-time))))]
-    [`((,ef ,ea) ,env ,store ,kont-ptr ,time)
-     (define kont-addr (gensym "kont"))
-     (abstractCESK* (p-dbg `(,ef ,env ,(join-store store
-                                                   (make-store kont-addr
-                                                               `(ar ,ea ,env ,kont-ptr)))
-                                 ,kont-addr ,(get-time))))]
-    [`(,v ,env ,store ,kont-ptr ,time)
-     (match (store-ref store kont-ptr)
-       [`(ar ,ea ,env-prime ,kont-ptr-prime)
-        (define kont-addr (gensym "kont"))
-        (abstractCESK* (p-dbg `(,ea ,env-prime
-                                    ,(join-store store
-                                                 (make-store kont-addr
-                                                             `(fn ,v ,env ,kont-ptr-prime)))
-                                    ,kont-addr ,(get-time))))]
-       [`(fn (λ (,x) ,eb) ,env-prime ,kont-ptr-prime)
-        (define var-addr (gensym "var"))
-        (abstractCESK* (p-dbg `(,eb ,(hash-set env-prime x var-addr)
-                                    ,(join-store store (make-store var-addr `(clo ,v ,env)))
-                                    ,kont-ptr-prime
-                                    ,(get-time))))]
-       [`halt
-        state])]))
 
-;; (abstractCESK* `((λ (x) x),(hash) ,(hash `halt-ptr `halt) halt-ptr ,(get-time)))
-;; (abstractCESK* `(((λ (x) (x (λ (z) z))) (λ (y) y)),(hash) ,(hash `halt-ptr `halt) halt-ptr ,(get-time)))
-;; (abstractCESK* `(((λ (x) (x (λ (z) z))) (λ (y) y)),(hash) ,(hash `halt-ptr (set `halt)) halt-ptr ,(get-time)))
 
-(define (alloc x state)
-  (match state
-    [`(,expr ,env ,store ,kont-ptr)
-     (cons x (hash-count store))]
-    )
-  )
 ;; Here we don't do context so, we don't give a time-stamp and return null for that.
 (define (alloc-0cfa x state)
   (match state
     [`(,expr ,env ,store ,kont-ptr)
-     (cons x '())]
-    )
+     (cons x kont-ptr)
+     ])
   )
-;; zero-cfa doesn't need time
-(define (zero-cfa state)
+
+(define (abstractCESK* state)
   (match state
-    [`(,(? number? x) ,env ,store ,kont-ptr)
-      `,x]
     [`(,(? symbol? x) ,env ,store ,kont-ptr)
-     (define x-val-clo (store-ref store (hash-ref env x)))
-     (zero-cfa (p-dbg `(,(cadr x-val-clo) ,(caddr x-val-clo)
-                                          ,store ,kont-ptr)))]
-    [`((,ef ,ea) ,env ,store ,kont-ptr)
-     (define kont-addr (gensym "kont"))
-     (zero-cfa (p-dbg `(,ef ,env ,(join-store store
-                                              (make-store kont-addr
-                                                          `(ar ,ea ,env ,kont-ptr)))
-                            ,kont-addr)))]
+     (define x-val-clo (hash-ref store (hash-ref env x)))
+     (abstractCESK* `(,(cadr x-val-clo) ,(caddr x-val-clo) ,store ,kont-ptr))]
+    [`((,ef ,eb) ,env ,store ,kont-ptr)
+     (define kont-addr (alloc-0cfa `kont state))
+     (abstractCESK* (p-dbg `(,ef ,env ,(hash-set store kont-addr `(ar ,eb ,env ,kont-ptr)) ,kont-addr)))]
     [`(,v ,env ,store ,kont-ptr)
-     (match (store-ref store kont-ptr)
-       [`(ar ,ea ,env-prime ,kont-ptr-prime)
-        (define kont-addr (gensym "kont"))
-        (zero-cfa (p-dbg `(,ea ,env-prime
-                               ,(join-store store
-                                            (make-store kont-addr
-                                                        `(fn ,v ,env ,kont-ptr-prime)))
-                               ,kont-addr)))]
+     (match (hash-ref store kont-ptr)
+       [`(ar ,eb ,env-prime ,kont-ptr-prime)
+        (define kont-addr (alloc-0cfa `kont state))
+        (abstractCESK* (p-dbg `(,eb ,env-prime ,(hash-set store kont-addr `(fn ,v ,env ,kont-ptr-prime)) ,kont-addr)))]
        [`(fn (λ (,x) ,eb) ,env-prime ,kont-ptr-prime)
-        (define var-addr (gensym "var"))
-        (zero-cfa (p-dbg `(,eb ,(hash-set env-prime x var-addr)
-                               ,(join-store store (make-store var-addr `(clo ,v ,env)))
-                               ,kont-ptr-prime)))]
+        (define var-addr (alloc-0cfa v state))
+        (abstractCESK* (p-dbg `(,eb ,(hash-set env-prime x var-addr) ,(hash-set store var-addr `(clo ,v ,env))  ,kont-ptr-prime)))]
        [`halt
-        state])]))
-(define store (hash `halt `halt (cons `y `()) 2))
-(define env (hash `halt `halt `y (cons `y `())))
-(zero-cfa `(((λ (x) x) (λ (y) y)) ,env ,store halt))
+        ;; `((clo ,v ,env) ,store)])]))
+        ;; store])]))
+        `(,v ,store)])]))
+;; (define store (hash `x `(clo 0 ,(hash)) `y `(clo 1 ,(hash)) `halt `halt))
+;; (define env (hash `x `x `y `y `halt `halt))
+;; (interpCESK* `((((λ (x) x) (λ (y) y)) (λ (z) x)) ,env ,store halt))
+(define env (hash `halt `halt `x `x))
+(define store (hash `halt `halt `x `(clo 2 ())))
+;; (abstractCESK* `(((λ (x) x) (λ (y) x)) ,env ,store halt))
+;; (abstractCESK* `((((λ (x) x) (λ (y) x)) 1) ,env ,store halt))
+;; (abstractCESK* `(((λ (x) x) (λ (y) y))
+(abstractCESK* `(((λ (z) z)((( (λ (p)(λ (a) (λ (b) ((p a) b)))) (λ (x) (λ (y) x))) 0) 1)) ,env ,store halt))
+;; (define store (hash `halt `halt (cons `y `()) 2))
+;; (define env (hash `halt `halt `y (cons `y `())))
+;; (zero-cfa `(((λ (x) x) (λ (y) y)) ,env ,store halt))
+;; (abstractCESK* `((λ (x) x),(hash) ,(hash `halt-ptr `halt) halt-ptr ,(get-time)))
+;; (abstractCESK* `(((λ (x) (x (λ (z) z))) (λ (y) y)),(hash) ,(hash `halt-ptr `halt) halt-ptr ,(get-time)))
+;; (abstractCESK* `(((λ (x) (x (λ (z) z))) (λ (y) y)),(hash) ,(hash `halt-ptr (set `halt)) halt-ptr ,(get-time)))
+
