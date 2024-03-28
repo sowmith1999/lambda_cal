@@ -1,0 +1,35 @@
+#lang racket
+
+; C machine (C = control expression)
+; CE machine ( C, E = lazy substitution "environment")
+
+(define (meta-interpCE exp [env (hash)])
+  (match exp
+    [(? symbol? x) (hash-ref env x)]
+    [`(lambda (,x) ,eb) (lambda (argv) (meta-interpCE eb (hash-set env x argv)))]
+    [`(,ef ,ea)
+     (define vf (meta-interpCE ef env))
+     (define va (meta-interpCE ea env))
+     (vf va)]))
+
+(define x (meta-interpCE `(lambda (x) (+ x 1))))
+
+; Closure-creating CE interp
+(define (interpCE exp [env (hash)])
+  (match exp
+    [(? symbol? x)
+     (hash-ref env x)]
+    [`(lambda (,x) ,eb)
+     `(closure `(lambda (,x) ,eb) ,env)]
+    [`(,ef ,ea)
+     (define vf (interpCE ef env))
+     (define va (interpCE ea env))
+       (match vf
+         [`(closure (lambda (,x) ,eb) ,envlam)
+          (interpCE eb (hash-set envlam x va))]
+         )]))
+(interCE (
+; CEK interp, K=Continuations
+; (interpCEK `((lambda (y) (lambda (y) y)) (lambda (y) ((lambda (x) x) y))))
+; (interpCEK `((lambda (x) x) (lambda (y) y))
+;; (define
